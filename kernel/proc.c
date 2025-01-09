@@ -686,3 +686,16 @@ procdump(void)
     printf("\n");
   }
 }
+
+int
+proc_not_unsed_num(void)//used by Lab2 : sysinfo
+{
+  int nproc = 0;
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++)
+  {
+    if(p->state != UNUSED)
+      nproc++;
+  }
+  return nproc;
+}

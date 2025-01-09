@@ -80,3 +80,21 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
+uint64
+free_mem_num(void)//used by Lab2 : sysinfo
+{
+  struct run *r;
+  uint64 free_page_num = 0;
+
+  acquire(&kmem.lock);
+  r = kmem.freelist;
+  while(r)
+  {
+    r = r->next;
+    free_page_num++;
+  }
+  release(&kmem.lock);
+
+  return free_page_num * 4096;
+}
