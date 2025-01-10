@@ -449,3 +449,30 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+static int printdeep = 0;
+void
+vmprint(pagetable_t pagetable)
+{
+  if (printdeep == 0)
+    printf("page table %p\n", (uint64)pagetable);
+
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V)){
+      for (int j = 0; j <= printdeep; j++) 
+        printf(" ..");
+      printf("%d: pte %p pa %p\n", i, (uint64)pte, (uint64)PTE2PA(pte));
+    }
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      //该PTE有效位PTE_V被设置，但RWX访问权限位均未设置,为非叶子PTE节点。
+      //非叶节点PTE节点不需要设置RWX访问权限位，因为它们并不直接关联到可以执行或访问的数据或代码页面，仅叶子PTE需要访问权限位
+      // this PTE points to a lower-level page table.//递归
+    printdeep++;
+    uint64 child_pa = PTE2PA(pte);
+    vmprint((pagetable_t)child_pa);
+    printdeep--;
+    }
+  }
+}
