@@ -75,6 +75,35 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  struct proc *p;
+  pagetable_t pagetable;
+  p = myproc();
+  pagetable = p->pagetable;
+
+  // 拿到用户空间系统调用的传入参数（起始地址，检查数量，地址）
+  uint64 va_start;//用户空间的起始虚拟地址
+  int page_num;
+  uint64 abits;//就是用户空间的abits虚拟地址
+  argaddr(0,&va_start);
+  argint(1,&page_num);
+  argaddr(2,&abits);
+
+  //检查当前页表所有叶子PTE的PTE_A位，并填充到Kernel_abits
+  uint64 Kernel_abits = 0;
+  for(int i = 0; i < page_num; i++){
+    pte_t *pte = walk(pagetable, va_start + i*PGSIZE, 0);//由用户空间虚拟地址得到叶子节点PTE
+    if (*pte & PTE_A)
+    {
+      Kernel_abits = Kernel_abits | (1L << i);
+    }
+    //所有的page_num个PTE_A置为0
+    *pte = (*pte) & (~PTE_A);
+  }
+
+  //从内核空间复制到用户空间地址
+  if(copyout(pagetable, abits, (char *)&Kernel_abits, sizeof(Kernel_abits)) < 0)
+    panic("sys_pgacess copyout error");
+  
   return 0;
 }
 #endif
