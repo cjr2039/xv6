@@ -48,6 +48,15 @@ sys_sbrk(void)
   return addr;
 }
 
+//这个函数纯粹是为了想要多一层调用的栈帧
+void
+cjr(void)
+{
+  printf("a");
+  backtrace();
+  printf("b");
+}
+
 uint64
 sys_sleep(void)
 {
@@ -57,6 +66,8 @@ sys_sleep(void)
   argint(0, &n);
   if(n < 0)
     n = 0;
+  // backtrace();
+  cjr();//calls backtrace()
   acquire(&tickslock);
   ticks0 = ticks;
   while(ticks - ticks0 < n){

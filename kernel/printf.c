@@ -133,3 +133,15 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+void
+backtrace(void)
+{
+  printf("backtrace:\n");
+  uint64 fp_address = r_fp();
+  while(fp_address != PGROUNDDOWN(fp_address)) {
+    //这个停止条件存在潜在的误判风险，尤其是在call train中某个函数的栈帧恰好位于新的一个page的页面边界上(边界对齐了),这个条件会错误地认为已经到达了栈底，从而提前终止回溯
+    printf("%p\n", *(uint64*)(fp_address-8));
+    fp_address = *(uint64*)(fp_address - 16);
+  }
+}
