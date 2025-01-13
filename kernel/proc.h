@@ -104,4 +104,11 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // for Lab4 : alarm
+  int alarm_interval; // sigalarm的第一个参数 调用周期
+  uint64 handler_va;  // sigalarm的第二个参数 the virtual address of alarm handler function in user page
+  int passed_ticks;   //自从上一次调用以来经过的时钟周期数
+  struct trapframe saved_trapframe;// save registers so that we can re-store it when return to interrupted code.  保存发生定时器中断时刻的trapframe。就好像定时器中断从未发生一样 
+  int can_be_called;    // a bool value that shows whether or not we can call alarm handler.防止重入：即防止在定时器中断处理程序尚未完成时再次触发
 };

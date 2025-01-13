@@ -78,7 +78,21 @@ usertrap(void)
 
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
+  {
+    //检查定时器中断周期非空、检查是否可以调用位于handler_va处的定时器中断处理函数(防止重入：即防止在处理程序尚未完成时再次触发)
+    if (p->alarm_interval && p->can_be_called)
+    {
+      // if (++p->passed_ticks == 2)//每隔2个ticks执行一次alarm_interval
+      if (++p->passed_ticks == p->alarm_interval)//周期性的定时器中断,周期由系统调用sigalarm的第一个参数决定
+      {
+        p->saved_trapframe = *p->trapframe; // cpu跳转到handler_va执行处理函数前，先保存跳转前的trapframe到saved_trapframe中，供之后re-store，这样后面恢复之后，就好像定时器中断从未发生一样。保存的是发生定时器中断时刻的trapframe
+        p->trapframe->epc = p->handler_va;  // make cpu jmp to the handler function，这个因为时钟引发的usertrap返回到userspace后，pc会被trampoline中的userret恢复为p->trapframe->epc,也就是去执行handler_va
+        p->passed_ticks = 0;                // Reset 重置自上次调用以来的ticks计数
+        p->can_be_called = 0;               // 定时器中断处理函数会在当前trap返回userspace后开始执行，禁止再次进入中断处理函数
+      }
+    }
     yield();
+  }
 
   usertrapret();
 }
