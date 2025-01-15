@@ -15,6 +15,10 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+// for Lab5 : COW   declared in kernel/kalloc.c
+extern int useReference[PHYSTOP/PGSIZE];
+extern struct spinlock ref_count_lock;
+
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -315,22 +319,41 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  //char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+
+    if (*pte & PTE_W) {
+      //如果父进程内存页是可写的，将父进程设置为COW和只读的。并复制到子进程，使子进程设置为COW和只读的
+      *pte &= ~PTE_W;   //不可写入，只读
+      *pte |= PTE_RSW;  //只对可写的父进程页表设置COW位
+    }
+      //如果父进程内存页是不可写入的，则为只读，不用管，不用设置COW，直接复制给子进程，使子进程设置只读的
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+
+    /*
+    //删除下面三行，Copy-On-Write fork，先不分配，后面写入不存在的pagetable，发生page fault的时候再分配
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+     */
+    
+    //但是COW需要照样映射,只有映射了，后面写入不存在的pagetable才能发生page fault
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){//该函数内部调用walk，walk由于第三个参数为1，所以walk会创建三级子进程page table//将子进程的第三级页表的页表项(PTE)映射为父进程PTE物理地址
+      //kfree(mem);
       goto err;
     }
+    // increment the ref count  
+    // mappages映射完后，需要对这个pa增加引用计数，因为这个pa现在分别保存在父、子进程页表的PTE里面
+    // 无论父进程页表R或W或RW，都不能在子进程结束前free这个pa。如果这里不增加引用计数，就会发生free，造成子进程页表无法使用。
+    acquire(&ref_count_lock);
+    useReference[pa/PGSIZE] += 1;
+    release(&ref_count_lock);
   }
   return 0;
 
@@ -366,10 +389,26 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     if(va0 >= MAXVA)
       return -1;
     pte = walk(pagetable, va0, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-       (*pte & PTE_W) == 0)
+    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 || (*pte == 0))//COW时，标志位PTE_W会被清除,同时*pte即页表项存储的物理地址不可为0
       return -1;
     pa0 = PTE2PA(*pte);
+
+    if(*pte & PTE_RSW)// a COW page
+    {
+      char *mem;
+      if ((mem = kalloc()) == 0) 
+        return -1;
+      else
+      {
+        memmove(mem, (char*)pa0, PGSIZE);//把物理地址pa0那一页的所有数据拷贝进新分配的地址为mem的那一页
+        uint flags = PTE_FLAGS(*pte);//一定要在uvmunmap前，因为kfree会把*pte那个地方填满junks
+        uvmunmap(pagetable, va0, 1, 1);//内部调用kfree，kfree会减少物理地址为pa0(由va0映射)的那页page的引用计数
+        *pte = (PA2PTE(mem) | flags | PTE_W);//将pte指向新分配的物理地址,同时保存之前的权限 并且 设为可写
+        *pte &= ~PTE_RSW;//已分配物理内存，清楚PTE_RSW
+        pa0 = (uint64)mem;//更新page的物理地址为新分配的mem，供下面414行使用
+      }
+    }
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;

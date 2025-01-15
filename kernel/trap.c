@@ -65,6 +65,16 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(r_scause() == 15){
+    /*发生page fault，由尝试写入只读的页表引起
+    scause寄存器为15代表，Store/AMO page fault，即尝试写入被设置为只读的页表
+    意味着之前COW后，设置为只读的子进程页表，现在需要被使用(尝试写入发生了pagefault)，则开始分配*/
+
+    //stval(Supervisor Trap Value) 寄存器中的值是导致发生异常的虚拟地址
+    uint64 va = r_stval();
+    if (cowhandler(p->pagetable, va) != 0)//开始分配
+      p->killed = 1;
+    ;
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -219,3 +229,27 @@ devintr()
   }
 }
 
+int
+cowhandler(pagetable_t pagetable, uint64 va)
+{
+  /*检查三个条件 : 1、PTE非空 2、PTE被标记为PTE_RSW 3、PTE被标记为PTE_U 4、PTE被标记为PTE_V 满足这四个条件的Virtual Address，才可以被分配物理内存 
+  注意 : 需要PTE_U是因为父(子)进程是在userspace执行，需要PTE_U权限。只有userspace的父(子)进程才会发生因为COW fork导致的page fault，只有父(子)进程才需要执行下面的物理内存分配。
+  也就是说运行在kernelspace的进程不会出现因为COW fork导致的page fault,在kernelspace发生scause为15的这个page fault一定不是因为COW，而是存在其他写入只读页表的错误，不应该执行下面的物理内存分配。*/
+  pte_t *pte = walk(pagetable, va, 0);//出现page fault所在的那个进程。可能是父进程，也可能是子进程。
+  if (pte == 0)
+    return -1;
+  if ((*pte & PTE_RSW) == 0 || (*pte & PTE_U) == 0 || (*pte & PTE_V) == 0)
+    return -1;//如果本来的页就是只读的，那么在此时尝试对其进行写入，会因为PTE_RSW为0，会返回 -1，最终被杀死。
+
+  // 检查通过，下面开始分配物理空间
+  char *mem;
+  if ((mem = kalloc()) == 0)
+    return -1;
+  uint flags = PTE_FLAGS(*pte); // 老页表的权限
+  uint64 pa = PTE2PA(*pte);     // 老页表的物理地址
+  memmove((char*)mem, (char*)pa, PGSIZE);//把物理地址pa0那一页的所有数据拷贝进新分配的地址为mem的那一页
+  kfree((void*)pa);// 函数内部减少了老页表物理内存的引用计数，因为分配了新页表的物理内存
+  *pte = (PA2PTE(mem) | flags | PTE_W);//将pte指向新分配的物理地址,同时保存之前的权限 并且 设为可写
+  *pte &= ~PTE_RSW;//已分配物理内存，清楚PTE_RSW
+  return 0;
+}

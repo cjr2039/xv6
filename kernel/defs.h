@@ -147,6 +147,7 @@ void            trapinit(void);
 void            trapinithart(void);
 extern struct spinlock tickslock;
 void            usertrapret(void);
+int cowhandler(pagetable_t,uint64);//Lab5 : COW fork
 
 // uart.c
 void            uartinit(void);

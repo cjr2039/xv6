@@ -14,6 +14,11 @@ void freerange(void *pa_start, void *pa_end);
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+// for Lab5 ：cow  
+int useReference[PHYSTOP/PGSIZE];//the reference count of physical memory page
+struct spinlock ref_count_lock;
+int temp_useReference;//减小临界区
+
 struct run {
   struct run *next;
 };
@@ -51,6 +56,15 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  acquire(&ref_count_lock);
+  useReference[(uint64)pa/PGSIZE] -= 1;
+  temp_useReference = useReference[(uint64)pa/PGSIZE];//减小临界区
+  release(&ref_count_lock);
+
+  if(temp_useReference > 0)
+    return;//还有其他引用，不能释放该页面，返回
+  
+  //没有其他引用，继续执行，从而释放该页面
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -73,7 +87,13 @@ kalloc(void)
   acquire(&kmem.lock);
   r = kmem.freelist;
   if(r)
+  {
     kmem.freelist = r->next;
+    acquire(&ref_count_lock);
+    useReference[(uint64)r / PGSIZE] = 1;
+    release(&ref_count_lock);
+  }
+    
   release(&kmem.lock);
 
   if(r)
