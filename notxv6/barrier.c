@@ -30,7 +30,23 @@ barrier()
   // Block until all threads have called barrier() and
   // then increment bstate.round.
   //
-  
+  pthread_mutex_lock(&bstate.barrier_mutex); // Lock
+
+  bstate.nthread++;//在多个线程里都会++，所有上锁
+
+  if(bstate.nthread < nthread)
+  {
+    /* go to sleep on cond, releasing lock mutex, acquiring upon wake up 这个线程会被加入到条件变量 cond 的等待队列中 */ 
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  }
+  else//由最后一个到达barrier的那个线程，来执行broadcast，并进行清理
+  {
+    pthread_cond_broadcast(&bstate.barrier_cond);
+    bstate.nthread = 0;
+    bstate.round++;
+  }
+
+  pthread_mutex_unlock(&bstate.barrier_mutex); // Unlock
 }
 
 static void *
@@ -44,7 +60,7 @@ thread(void *xa)
     int t = bstate.round;
     assert (i == t);
     barrier();
-    usleep(random() % 100);
+    usleep(random() % 100);//模拟了不同线程执行不同任务，有不同的运行时间，运行时间短的线程会先到到barrier
   }
 
   return 0;
