@@ -17,6 +17,7 @@ struct entry *table[NBUCKET];
 int keys[NKEYS];
 int nthread = 1;
 
+pthread_mutex_t lock[NBUCKET]; // a lock for each BUCKET
 
 double
 now()
@@ -51,8 +52,10 @@ void put(int key, int value)
     // update the existing key.
     e->value = value;
   } else {
-    // the new is new.
-    insert(key, value, &table[i], table[i]);
+    // the key is new.add this key to table[i]
+    pthread_mutex_lock(&lock[i]);
+    insert(key, value, &table[i], table[i]);    /*当多个线程同时更新这个链表，会发生race conditon,造成丢失链表节点。类似课上讲的,kfree会在缺少锁时丢失page*/
+    pthread_mutex_unlock(&lock[i]);
   }
 
 }
@@ -117,6 +120,9 @@ main(int argc, char *argv[])
   for (int i = 0; i < NKEYS; i++) {
     keys[i] = random();
   }
+
+  for (int i = 0; i < NBUCKET; ++i)
+    pthread_mutex_init(&lock[i], NULL);
 
   //
   // first the puts
